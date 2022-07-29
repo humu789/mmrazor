@@ -1,4 +1,5 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+import copy
 import os
 import os.path as osp
 import random
@@ -14,10 +15,13 @@ from mmengine.utils import is_list_of
 from torch.utils.data import DataLoader
 
 from mmrazor.registry import LOOPS
-from mmrazor.structures import Candidates, FlopsEstimator, export_fix_subnet
+from mmrazor.structures import (Candidates, export_fix_subnet, load_fix_subnet,
+    get_model_complexity_info)
 from mmrazor.utils import SupportRandomSubnet
 from .utils import crossover
 
+count_scope_type = Union[str, List[str]]
+flops_constraint_type = Optional[Tuple[count_scope_type, Tuple[float, float]]]
 
 @LOOPS.register_module()
 class EvolutionSearchLoop(EpochBasedTrainLoop):
@@ -40,8 +44,8 @@ class EvolutionSearchLoop(EpochBasedTrainLoop):
         num_crossover (int): The number of candidates got by crossover.
             Defaults to 25.
         mutate_prob (float): The probability of mutation. Defaults to 0.1.
-        flops_range (tuple, optional): flops_range to be used for screening
-            candidates.
+        flops_constraint (flops_constraint_type, optional): flops_constraint 
+            to be used for screening candidates.
         score_key (str): Specify one metric in evaluation results to score
             candidates. Defaults to 'accuracy_top-1'.
         init_candidates (str, optional): The candidates file path, which is
@@ -61,8 +65,9 @@ class EvolutionSearchLoop(EpochBasedTrainLoop):
                  num_mutation: int = 25,
                  num_crossover: int = 25,
                  mutate_prob: float = 0.1,
-                 flops_range: Optional[Tuple[float, float]] = (0., 330 * 1e6),
-                 score_key: str = 'accuracy_top-1',
+                 flops_constraint: flops_constraint_type = \
+                    ('architecture', (0., 330 * 1e6)),
+                 score_key: str = 'accuracy/top1',
                  init_candidates: Optional[str] = None) -> None:
         super().__init__(runner, dataloader, max_epochs)
         if isinstance(evaluator, dict) or is_list_of(evaluator, dict):
@@ -79,7 +84,7 @@ class EvolutionSearchLoop(EpochBasedTrainLoop):
 
         self.num_candidates = num_candidates
         self.top_k = top_k
-        self.flops_range = flops_range
+        self.flops_constraint = flops_constraint
         self.score_key = score_key
         self.num_mutation = num_mutation
         self.num_crossover = num_crossover
@@ -150,7 +155,7 @@ class EvolutionSearchLoop(EpochBasedTrainLoop):
             crossover should be no more than the number of candidates.'
 
         self.candidates = Candidates(candidates)
-        self.runner.epoch += 1
+        self._epoch += 1
 
     def sample_candidates(self) -> None:
         """Update candidate pool contains specified number of candicates."""
@@ -172,8 +177,8 @@ class EvolutionSearchLoop(EpochBasedTrainLoop):
             metrics = self._val_candidate()
             score = metrics[self.score_key] \
                 if len(metrics) != 0 else 0.
-            # score = 0.
-            self.candidates.set_score(i, score)
+            
+            self.candidates.set_score(i, round(score, 3))
             self.runner.logger.info(
                 f'Epoch:[{self.runner.epoch}/{self.max_epochs}] '
                 f'Candidate:[{i + 1}/{self.num_candidates}] '
@@ -294,14 +299,20 @@ class EvolutionSearchLoop(EpochBasedTrainLoop):
         Returns:
             bool: The result of checking.
         """
-        if self.flops_range is None:
+        if self.flops_constraint is None:
             return True
 
         self.model.set_subnet(random_subnet)
         fix_mutable = export_fix_subnet(self.model)
-        flops: float = FlopsEstimator.get_model_complexity_info(
-            self.model, fix_mutable=fix_mutable, as_strings=False)[0]
-        if self.flops_range[0] < flops < self.flops_range[1]:
+        copied_model = copy.deepcopy(self.model)
+        load_fix_subnet(copied_model, fix_mutable)
+        flops: float = get_model_complexity_info(
+            model=copied_model,
+            input_shape=(3, 224, 224),
+            count_scope=self.flops_constraint[0],
+            print_per_layer_stat=False,
+            as_strings=False)[0]
+        if self.flops_constraint[1][0] <= flops <= self.flops_constraint[1][1]:
             return True
         else:
             return False
