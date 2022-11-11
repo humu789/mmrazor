@@ -17,7 +17,11 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Feature map visualization')
     parser.add_argument('img', help='Image file')
     parser.add_argument('config', help='train config file path')
+<<<<<<< HEAD
     parser.add_argument('vis_config', help='visualization config file path')
+=======
+    parser.add_argument('vis-config', help='visualization config file path')
+>>>>>>> c6637be ([FEATURE] add quant algo `Learned Step Size Quantization` (#346))
     parser.add_argument('checkpoint', help='Checkpoint file')
     parser.add_argument('--out-file', default=None, help='Path to output file')
     parser.add_argument(

@@ -7,6 +7,7 @@ from .nas import (DSNAS, DSNASDDP, SPOS, Autoformer, AutoSlim, AutoSlimDDP,
                   BigNAS, BigNASDDP, Darts, DartsDDP)
 from .pruning import DCFF, SlimmableNetwork, SlimmableNetworkDDP
 from .pruning.ite_prune_algorithm import ItePruneAlgorithm
+from .quantization import GeneralQuant
 
 __all__ = [
     'SingleTeacherDistill', 'BaseAlgorithm', 'FpnTeacherDistill', 'SPOS',

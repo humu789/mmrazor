@@ -7,10 +7,12 @@ from .iteprune_val_loop import ItePruneValLoop
 from .slimmable_val_loop import SlimmableValLoop
 from .subnet_sampler_loop import GreedySamplerTrainLoop
 from .subnet_val_loop import SubnetValLoop
+from .quantization_loops import PTQLoop, QATEpochBasedLoop
 
 __all__ = [
     'SingleTeacherDistillValLoop', 'DartsEpochBasedTrainLoop',
     'DartsIterBasedTrainLoop', 'SlimmableValLoop', 'EvolutionSearchLoop',
     'GreedySamplerTrainLoop', 'SubnetValLoop', 'SelfDistillValLoop',
-    'ItePruneValLoop', 'AutoSlimGreedySearchLoop'
+    'ItePruneValLoop', 'AutoSlimGreedySearchLoop', 'PTQLoop', 
+    'QATEpochBasedLoop'
 ]
