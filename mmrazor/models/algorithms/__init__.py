@@ -15,5 +15,5 @@ __all__ = [
     'Darts', 'DartsDDP', 'DCFF', 'SelfDistill', 'DataFreeDistillation',
     'DAFLDataFreeDistillation', 'OverhaulFeatureDistillation',
     'ItePruneAlgorithm', 'DSNAS', 'DSNASDDP', 'Autoformer', 'BigNAS',
-    'BigNASDDP'
+    'BigNASDDP', 'GeneralQuant'
 ]
