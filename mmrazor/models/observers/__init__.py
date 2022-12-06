@@ -2,5 +2,7 @@
 from .lsq_observer import LSQObserver
 from .minmax import EMAMinMaxObserver, MinMaxObserver
 from .mse import MSEObserver
+from .torch_observers import register_torch_observers
 
-__all__ = ['MinMaxObserver', 'MSEObserver', 'EMAMinMaxObserver', 'LSQObserver']
+__all__ = ['MinMaxObserver', 'MSEObserver', 'EMAMinMaxObserver', 'LSQObserver',
+           'register_torch_observers']
