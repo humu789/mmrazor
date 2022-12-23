@@ -75,7 +75,6 @@ class OpenVINOQuantizer(NativeQuantizer):
         if target_next:
             prepared = del_fakequant_after_target(
                 prepared, target_next, inplace=True)
-        print(prepared)
 
         return prepared
 
