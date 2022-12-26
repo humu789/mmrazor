@@ -7,8 +7,9 @@ from mmengine.model import MMDistributedDataParallel
 from mmengine.runner import load_checkpoint
 from mmengine.structures import BaseDataElement
 from torch import nn
-from torch.ao.quantization import FakeQuantizeBase
 
+from mmrazor.models.fake_quants import BaseFakeQuantize
+from mmrazor.models.observers import BaseObserver
 from mmrazor.models.task_modules import build_graphmodule
 from mmrazor.registry import MODEL_WRAPPERS, MODELS
 from ..base import BaseAlgorithm
@@ -62,8 +63,14 @@ class MMArchitectureQuant(BaseAlgorithm):
         self.forward_modes = forward_modes
 
         self.qmodels = self._build_qmodels(self.architecture)
-
         self.sync_qparams('predict')
+        self.reset_min_max_vals(self.qmodels)
+
+    def reset_min_max_vals(self, model):
+        for module in model.modules():
+            if isinstance(module, BaseObserver):
+                assert hasattr(module, 'reset_min_max_vals')
+                module.reset_min_max_vals()
 
     def sync_qparams(self, src_mode):
 
@@ -72,7 +79,7 @@ class MMArchitectureQuant(BaseAlgorithm):
                 if module is None:
                     continue
                 child_name = f'{prefix}{name}'
-                if isinstance(child, FakeQuantizeBase):
+                if isinstance(child, BaseFakeQuantize):
                     for name, param in child.named_parameters():
                         param_name = f'{child_name}.{name}'
                         src_param = src_state_dict[param_name]
@@ -114,10 +121,21 @@ class MMArchitectureQuant(BaseAlgorithm):
             graph_mopdule = build_graphmodule(model, traced_graph)
             observed_module = self.quantizer.prepare(model, graph_mopdule)
             qmodels[mode] = observed_module
-        # import pdb
-        # pdb.set_trace()
-        # dummy_input = torch.randn(self.input_shapes)
-        # qmodels['predict'](dummy_input, None, 'predict')
+
+        is_training = qmodels['predict'].training
+        # Avoid random input changing bn's statistics
+        qmodels['predict'].eval()
+        # Originally, the steps to train a qat model is as follows:
+        # 1. build qmodels 2. convert the model to ddpmodel 3. forward backward
+        # The shape of `scale` and `zero_point` can be modified during forward.
+        # We initialize these parameters with per-tensor mode by default for
+        # convenience. Their shape will be modified during forward if
+        # per-channel mode is used. It's hacky. Hence we need to input a
+        # dummy input to make sure the shape has been modified.
+        device = next(qmodels.parameters()).device
+        dummy_input = torch.randn(self.input_shapes).to(device)
+        qmodels['predict'](dummy_input, None, 'predict')
+        qmodels['predict'].train(mode=is_training)
 
         return qmodels
 
