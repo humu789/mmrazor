@@ -24,16 +24,16 @@ def _get_attrs(target: torch.nn.Module, attr: str) -> Any:
     return target
 
 
-def del_fakequant_before_target(prepared_model: torch.fx.GraphModule,
-                                target_patterns: Tuple,
-                                inplace: bool = True) -> torch.fx.GraphModule:
-    """Delete useless fakequant before nodes whose target attribute
-    (node.target) is in `target_patterns`.
+def del_fakequant_before_op(prepared_model: torch.fx.GraphModule,
+                            target_ops: Tuple,
+                            inplace: bool = True) -> torch.fx.GraphModule:
+    """Delete useless fakequant before nodes whose ``op`` attribute (node.op)
+    is in `target_ops`.
 
     Args:
         prepared_model (GraphModule): Prepared standalone module.
-        target_patterns (tuple): Fakequants before nodes whose target attribute
-            (node.target) is in `target_patterns` will be deleted.
+        target_ops (tuple): Fakequants before nodes whose op attribute
+            (node.op) is in `target_ops` will be deleted.
         inplace (bool): Can optionally do the operation in-place. Defaults to
             True.
 
@@ -82,13 +82,90 @@ def del_fakequant_before_target(prepared_model: torch.fx.GraphModule,
         prepared_model = copy.deepcopy(prepared_model)
     new_graph = copy.deepcopy(prepared_model.graph)
     for node in new_graph.nodes:
-        if node.target in target_patterns:
+        if node.op in target_ops:
             nodes_to_erase: List[torch.fx.Node] = []
             recursive_find_erased_nodes(node)
             for to_erase in nodes_to_erase:
                 to_erase.replace_all_uses_with(to_erase.args[0])
                 new_graph.erase_node(to_erase)
                 delattr(prepared_model, to_erase.target)
+    new_graph.lint()
+    prepared_model.graph = new_graph
+    return prepared_model
+
+
+def del_fakequant_after_op(prepared_model: torch.fx.GraphModule,
+                           target_ops: Tuple,
+                           inplace: bool = True) -> torch.fx.GraphModule:
+    """Delete useless fakequant after nodes whose ``op`` attribute (node.op) is
+    in `target_ops`.
+
+    Args:
+        prepared_model (GraphModule): Prepared standalone module.
+        target_ops (tuple): Fakequants after nodes whose op attribute
+            (node.op) is in `target_ops` will be deleted.
+        inplace (bool): Can optionally do the operation in-place. Defaults to
+            True.
+
+    Returns:
+        GraphModule: Prepared standalone module after deletion.
+    """
+    if not inplace:
+        prepared_model = copy.deepcopy(prepared_model)
+    new_graph = copy.deepcopy(prepared_model.graph)
+
+    target_nodes = []
+    for node in new_graph.nodes:
+        if node.op in target_ops:
+            target_nodes.append(node)
+
+    for node in new_graph.nodes:
+        if node.op == 'call_module' and isinstance(
+                _get_attrs(prepared_model, node.target), FakeQuantizeBase):
+            assert len(node.args) == 1
+            prev_node = node.args[0]
+            if prev_node not in target_nodes:
+                continue
+            node.replace_all_uses_with(prev_node)
+            new_graph.erase_node(node)
+            delattr(prepared_model, node.target)
+    new_graph.lint()
+    prepared_model.graph = new_graph
+    return prepared_model
+
+
+def del_fakequant_before_target(prepared_model: torch.fx.GraphModule,
+                                target_patterns: Tuple,
+                                inplace: bool = True) -> torch.fx.GraphModule:
+    """Delete useless fakequant before nodes whose target attribute
+    (node.target) is in `target_patterns`.
+
+    Args:
+        prepared_model (GraphModule): Prepared standalone module.
+        target_patterns (tuple): Fakequants before nodes whose target attribute
+            (node.target) is in `target_patterns` will be deleted.
+        inplace (bool): Can optionally do the operation in-place. Defaults to
+            True.
+
+    Returns:
+        GraphModule: Prepared standalone module after deletion.
+    """
+    if not inplace:
+        prepared_model = copy.deepcopy(prepared_model)
+    new_graph = copy.deepcopy(prepared_model.graph)
+    for node in new_graph.nodes:
+        if node.target in target_patterns:
+            to_erase = node.args[0]
+            if not (to_erase.op == 'call_module' and isinstance(
+                    _get_attrs(prepared_model, to_erase.target),
+                    FakeQuantizeBase)):
+                # No fakequant before this node
+                continue
+            if len(to_erase.users) > 1:
+                continue
+            to_erase.replace_all_uses_with(to_erase.args[0])
+            new_graph.erase_node(to_erase)
+            delattr(prepared_model, to_erase.target)
     new_graph.lint()
     prepared_model.graph = new_graph
     return prepared_model

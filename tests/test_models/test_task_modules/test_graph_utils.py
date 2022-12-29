@@ -11,8 +11,10 @@ from torch.ao.quantization.quantize_fx import _fuse_fx
 from mmrazor.models.task_modules import build_graphmodule
 from mmrazor.models.task_modules.tracer import CustomTracer
 from mmrazor.models.task_modules.tracer.fx import (del_fakequant_after_module,
+                                                   del_fakequant_after_op,
                                                    del_fakequant_after_target,
                                                    del_fakequant_before_module,
+                                                   del_fakequant_before_op,
                                                    del_fakequant_before_target)
 from mmrazor.models.utils import str2class
 from mmrazor.structures.quantization import BackendConfigs, QConfigHander
@@ -121,6 +123,96 @@ class TestGraphUtils(TestCase):
         for name in modules_to_swap:
             del model._modules[name]
             model._modules[name] = torch.ao.nn.quantized.FXFloatFunctional()
+
+    def test_del_fakequant_before_op(self):
+        model_to_quantize = ToyModel()
+        model_to_quantize.eval()
+
+        self.swap_ff_with_fxff(model_to_quantize)
+        traced_graph = self.tracer.trace(model_to_quantize)
+        graph_module = build_graphmodule(model_to_quantize, traced_graph)
+
+        graph_module = _fuse_fx(
+            graph_module=graph_module,
+            is_qat=True,
+            backend_config=self.backend_config)
+        prepared = prepare(
+            model=graph_module,
+            qconfig_mapping=self.qconfig_mapping,
+            is_qat=True,
+            node_name_to_scope=self.tracer.node_name_to_scope,
+            example_inputs=self.example_inputs,
+            backend_config=self.backend_config)
+
+        OP_DEL_PREV_FAKEQUANT = ('output', )
+
+        prepared_after_del = del_fakequant_before_op(
+            prepared, OP_DEL_PREV_FAKEQUANT, inplace=False)
+        for node in prepared.graph.nodes:
+            if node.target == 'output':
+                args = node.args
+                self.assertIsInstance(
+                    _get_attrs(prepared, args[0].target), FakeQuantizeBase)
+
+        for node in prepared_after_del.graph.nodes:
+            if node.target == 'output':
+                args = node.args
+                self.assertEqual(len(args), 1)
+                self.assertEqual(args[0].target, 'fc')
+                self.assertIsInstance(
+                    _get_attrs(prepared, args[0].target), nn.Linear)
+
+        prepared_after_del = del_fakequant_before_op(
+            prepared, OP_DEL_PREV_FAKEQUANT, inplace=True)
+        for node in prepared_after_del.graph.nodes:
+            if node.target == 'output':
+                args = node.args
+                self.assertEqual(len(args), 1)
+                self.assertEqual(args[0].target, 'fc')
+
+    def test_del_fakequant_after_op(self):
+        model_to_quantize = ToyModel()
+        model_to_quantize.eval()
+
+        self.swap_ff_with_fxff(model_to_quantize)
+        traced_graph = self.tracer.trace(model_to_quantize)
+        graph_module = build_graphmodule(model_to_quantize, traced_graph)
+
+        graph_module = _fuse_fx(
+            graph_module=graph_module,
+            is_qat=True,
+            backend_config=self.backend_config)
+        prepared = prepare(
+            model=graph_module,
+            qconfig_mapping=self.qconfig_mapping,
+            is_qat=True,
+            node_name_to_scope=self.tracer.node_name_to_scope,
+            example_inputs=self.example_inputs,
+            backend_config=self.backend_config)
+
+        OP_DEL_NEXT_FAKEQUANT = ('placeholder', )
+
+        prepared_after_del = del_fakequant_after_op(
+            prepared, OP_DEL_NEXT_FAKEQUANT, inplace=False)
+        for node in prepared.graph.nodes:
+            if node.target == 'stem_layer.0':
+                args = node.args
+                self.assertIsInstance(
+                    _get_attrs(prepared, args[0].target), FakeQuantizeBase)
+
+        for node in prepared_after_del.graph.nodes:
+            if node.target == 'stem_layer.0':
+                args = node.args
+                self.assertEqual(len(args), 1)
+                self.assertEqual(args[0].op, 'placeholder')
+
+        prepared_after_del = del_fakequant_after_op(
+            prepared, OP_DEL_NEXT_FAKEQUANT, inplace=True)
+        for node in prepared_after_del.graph.nodes:
+            if node.target == 'stem_layer.0':
+                args = node.args
+                self.assertEqual(len(args), 1)
+                self.assertEqual(args[0].op, 'placeholder')
 
     def test_del_fakequant_before_target(self):
 
