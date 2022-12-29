@@ -1,4 +1,5 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+import operator
 from unittest import TestCase
 
 import torch
@@ -10,13 +11,11 @@ from torch.ao.quantization.quantize_fx import _fuse_fx
 
 from mmrazor.models.task_modules import build_graphmodule
 from mmrazor.models.task_modules.tracer import CustomTracer
-from mmrazor.models.task_modules.tracer.fx import (del_fakequant_after_module,
-                                                   del_fakequant_after_op,
-                                                   del_fakequant_after_target,
-                                                   del_fakequant_before_module,
-                                                   del_fakequant_before_op,
-                                                   del_fakequant_before_target)
-from mmrazor.models.utils import str2class
+from mmrazor.models.task_modules.tracer.fx import (
+    del_fakequant_after_function, del_fakequant_after_method,
+    del_fakequant_after_module, del_fakequant_after_op,
+    del_fakequant_before_function, del_fakequant_before_method,
+    del_fakequant_before_module, del_fakequant_before_op)
 from mmrazor.structures.quantization import BackendConfigs, QConfigHander
 
 
@@ -77,6 +76,7 @@ class ToyModel(nn.Module):
             nn.Conv2d(3, 3, 1), nn.BatchNorm2d(3), nn.ReLU())
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         self.block = BasicBlock(3, 3)
+        self.block2 = BasicBlock(3, 3)
         self.gap = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(3, 4)
 
@@ -84,6 +84,7 @@ class ToyModel(nn.Module):
         x = self.stem_layer(x)
         x = self.maxpool(x)
         x = self.block(x)
+        x = self.block2(x)
         x = self.gap(x)
         x = x.flatten(1)
         x = self.fc(x)
@@ -144,31 +145,29 @@ class TestGraphUtils(TestCase):
             example_inputs=self.example_inputs,
             backend_config=self.backend_config)
 
-        OP_DEL_PREV_FAKEQUANT = ('output', )
+        op_del_prev_fakequant = ('output', )
 
         prepared_after_del = del_fakequant_before_op(
-            prepared, OP_DEL_PREV_FAKEQUANT, inplace=False)
+            prepared, op_del_prev_fakequant, inplace=False)
         for node in prepared.graph.nodes:
-            if node.target == 'output':
+            if node.op in op_del_prev_fakequant:
                 args = node.args
                 self.assertIsInstance(
                     _get_attrs(prepared, args[0].target), FakeQuantizeBase)
 
         for node in prepared_after_del.graph.nodes:
-            if node.target == 'output':
+            if node.op in op_del_prev_fakequant:
                 args = node.args
-                self.assertEqual(len(args), 1)
-                self.assertEqual(args[0].target, 'fc')
-                self.assertIsInstance(
-                    _get_attrs(prepared, args[0].target), nn.Linear)
+                self.assertNotIsInstance(
+                    _get_attrs(prepared, args[0].target), FakeQuantizeBase)
 
         prepared_after_del = del_fakequant_before_op(
-            prepared, OP_DEL_PREV_FAKEQUANT, inplace=True)
+            prepared, op_del_prev_fakequant, inplace=True)
         for node in prepared_after_del.graph.nodes:
-            if node.target == 'output':
+            if node.op in op_del_prev_fakequant:
                 args = node.args
-                self.assertEqual(len(args), 1)
-                self.assertEqual(args[0].target, 'fc')
+                self.assertNotIsInstance(
+                    _get_attrs(prepared, args[0].target), FakeQuantizeBase)
 
     def test_del_fakequant_after_op(self):
         model_to_quantize = ToyModel()
@@ -190,31 +189,28 @@ class TestGraphUtils(TestCase):
             example_inputs=self.example_inputs,
             backend_config=self.backend_config)
 
-        OP_DEL_NEXT_FAKEQUANT = ('placeholder', )
+        op_del_next_fakequant = ('placeholder', )
 
         prepared_after_del = del_fakequant_after_op(
-            prepared, OP_DEL_NEXT_FAKEQUANT, inplace=False)
+            prepared, op_del_next_fakequant, inplace=False)
         for node in prepared.graph.nodes:
-            if node.target == 'stem_layer.0':
-                args = node.args
+            if node.op in op_del_next_fakequant:
                 self.assertIsInstance(
-                    _get_attrs(prepared, args[0].target), FakeQuantizeBase)
+                    _get_attrs(prepared, node.next.target), FakeQuantizeBase)
 
         for node in prepared_after_del.graph.nodes:
-            if node.target == 'stem_layer.0':
-                args = node.args
-                self.assertEqual(len(args), 1)
-                self.assertEqual(args[0].op, 'placeholder')
+            if node.op in op_del_next_fakequant:
+                self.assertNotIsInstance(
+                    _get_attrs(prepared, node.next.target), FakeQuantizeBase)
 
         prepared_after_del = del_fakequant_after_op(
-            prepared, OP_DEL_NEXT_FAKEQUANT, inplace=True)
+            prepared, op_del_next_fakequant, inplace=True)
         for node in prepared_after_del.graph.nodes:
-            if node.target == 'stem_layer.0':
-                args = node.args
-                self.assertEqual(len(args), 1)
-                self.assertEqual(args[0].op, 'placeholder')
+            if node.op in op_del_next_fakequant:
+                self.assertNotIsInstance(
+                    _get_attrs(prepared, node.next.target), FakeQuantizeBase)
 
-    def test_del_fakequant_before_target(self):
+    def test_del_fakequant_before_method(self):
 
         model_to_quantize = ToyModel()
         model_to_quantize.eval()
@@ -235,33 +231,34 @@ class TestGraphUtils(TestCase):
             example_inputs=self.example_inputs,
             backend_config=self.backend_config)
 
-        target_prev = ('output', )
+        method_del_prev_fakequant = ('flatten', )
 
-        prepared_after_del = del_fakequant_before_target(
-            prepared, target_prev, inplace=False)
+        prepared_after_del = del_fakequant_before_method(
+            prepared, method_del_prev_fakequant, inplace=False)
         for node in prepared.graph.nodes:
-            if node.target == 'output':
+            if node.op == 'call_method' and \
+                    node.target in method_del_prev_fakequant:
                 args = node.args
                 self.assertIsInstance(
                     _get_attrs(prepared, args[0].target), FakeQuantizeBase)
 
         for node in prepared_after_del.graph.nodes:
-            if node.target == 'output':
+            if node.op == 'call_method' and \
+                    node.target in method_del_prev_fakequant:
                 args = node.args
-                self.assertEqual(len(args), 1)
-                self.assertEqual(args[0].target, 'fc')
-                self.assertIsInstance(
-                    _get_attrs(prepared, args[0].target), nn.Linear)
+                self.assertNotIsInstance(
+                    _get_attrs(prepared, args[0].target), FakeQuantizeBase)
 
-        prepared_after_del = del_fakequant_before_target(
-            prepared, target_prev, inplace=True)
+        prepared_after_del = del_fakequant_before_method(
+            prepared, method_del_prev_fakequant, inplace=True)
         for node in prepared_after_del.graph.nodes:
-            if node.target == 'output':
+            if node.op == 'call_method' and \
+                    node.target in method_del_prev_fakequant:
                 args = node.args
-                self.assertEqual(len(args), 1)
-                self.assertEqual(args[0].target, 'fc')
+                self.assertNotIsInstance(
+                    _get_attrs(prepared, args[0].target), FakeQuantizeBase)
 
-    def test_del_fakequant_after_target(self):
+    def test_del_fakequant_after_method(self):
         model_to_quantize = ToyModel()
         model_to_quantize.eval()
 
@@ -281,29 +278,126 @@ class TestGraphUtils(TestCase):
             example_inputs=self.example_inputs,
             backend_config=self.backend_config)
 
-        target_next = ('flatten', )
+        method_del_next_fakequant = ('flatten', )
 
-        prepared_after_del = del_fakequant_after_target(
-            prepared, target_next, inplace=False)
+        prepared_after_del = del_fakequant_after_method(
+            prepared, method_del_next_fakequant, inplace=False)
         for node in prepared.graph.nodes:
-            if node.target == 'fc':
+            if node.op == 'call_method' and \
+                    node.target in method_del_next_fakequant:
+                self.assertIsInstance(
+                    _get_attrs(prepared, node.next.target), FakeQuantizeBase)
+
+        for node in prepared_after_del.graph.nodes:
+            if node.op == 'call_method' and \
+                    node.target in method_del_next_fakequant:
+                self.assertNotIsInstance(
+                    _get_attrs(prepared, node.next.target), FakeQuantizeBase)
+
+        prepared_after_del = del_fakequant_after_method(
+            prepared, method_del_next_fakequant, inplace=True)
+        for node in prepared_after_del.graph.nodes:
+            if node.op == 'call_method' and \
+                    node.target in method_del_next_fakequant:
+                self.assertNotIsInstance(
+                    _get_attrs(prepared, node.next.target), FakeQuantizeBase)
+
+    def test_del_fakequant_before_function(self):
+        model_to_quantize = ToyModel()
+        model_to_quantize.eval()
+
+        self.swap_ff_with_fxff(model_to_quantize)
+        traced_graph = self.tracer.trace(model_to_quantize)
+        graph_module = build_graphmodule(model_to_quantize, traced_graph)
+
+        graph_module = _fuse_fx(
+            graph_module=graph_module,
+            is_qat=True,
+            backend_config=self.backend_config)
+        prepared = prepare(
+            model=graph_module,
+            qconfig_mapping=self.qconfig_mapping,
+            is_qat=True,
+            node_name_to_scope=self.tracer.node_name_to_scope,
+            example_inputs=self.example_inputs,
+            backend_config=self.backend_config)
+
+        function_del_prev_fakequant = (operator.add, )
+
+        prepared_after_del = del_fakequant_before_function(
+            prepared, function_del_prev_fakequant, inplace=False)
+        for node in prepared.graph.nodes:
+            if node.op == 'call_function' and \
+                    node.target in function_del_prev_fakequant:
                 args = node.args
                 self.assertIsInstance(
                     _get_attrs(prepared, args[0].target), FakeQuantizeBase)
 
         for node in prepared_after_del.graph.nodes:
-            if node.target == 'fc':
+            if node.op == 'call_function' and \
+                    node.target in function_del_prev_fakequant:
                 args = node.args
-                self.assertEqual(len(args), 1)
-                self.assertEqual(args[0].target, 'flatten')
+                self.assertEqual(len(args), 2)
+                self.assertNotIsInstance(
+                    _get_attrs(prepared, args[0].target), FakeQuantizeBase)
+                self.assertNotIsInstance(
+                    _get_attrs(prepared, args[1].target), FakeQuantizeBase)
 
-        prepared_after_del = del_fakequant_after_target(
-            prepared, target_next, inplace=True)
+        prepared_after_del = del_fakequant_before_function(
+            prepared, function_del_prev_fakequant, inplace=True)
         for node in prepared_after_del.graph.nodes:
-            if node.target == 'fc':
+            if node.op == 'call_function' and \
+                    node.target in function_del_prev_fakequant:
                 args = node.args
-                self.assertEqual(len(args), 1)
-                self.assertEqual(args[0].target, 'flatten')
+                self.assertEqual(len(args), 2)
+                self.assertNotIsInstance(
+                    _get_attrs(prepared, args[0].target), FakeQuantizeBase)
+                self.assertNotIsInstance(
+                    _get_attrs(prepared, args[1].target), FakeQuantizeBase)
+
+    def test_del_fakequant_after_function(self):
+        model_to_quantize = ToyModel()
+        model_to_quantize.eval()
+
+        self.swap_ff_with_fxff(model_to_quantize)
+        traced_graph = self.tracer.trace(model_to_quantize)
+        graph_module = build_graphmodule(model_to_quantize, traced_graph)
+
+        graph_module = _fuse_fx(
+            graph_module=graph_module,
+            is_qat=True,
+            backend_config=self.backend_config)
+        prepared = prepare(
+            model=graph_module,
+            qconfig_mapping=self.qconfig_mapping,
+            is_qat=True,
+            node_name_to_scope=self.tracer.node_name_to_scope,
+            example_inputs=self.example_inputs,
+            backend_config=self.backend_config)
+
+        function_del_next_fakequant = (operator.add, )
+
+        prepared_after_del = del_fakequant_after_function(
+            prepared, function_del_next_fakequant, inplace=False)
+        for node in prepared.graph.nodes:
+            if node.op == 'call_function' and \
+                    node.target in function_del_next_fakequant:
+                self.assertIsInstance(
+                    _get_attrs(prepared, node.next.target), FakeQuantizeBase)
+
+        for node in prepared_after_del.graph.nodes:
+            if node.op == 'call_function' and \
+                    node.target in function_del_next_fakequant:
+                self.assertNotIsInstance(
+                    _get_attrs(prepared, node.next.target), FakeQuantizeBase)
+
+        prepared_after_del = del_fakequant_after_function(
+            prepared, function_del_next_fakequant, inplace=True)
+        for node in prepared_after_del.graph.nodes:
+            if node.op == 'call_function' and \
+                    node.target in function_del_next_fakequant:
+                self.assertNotIsInstance(
+                    _get_attrs(prepared, node.next.target), FakeQuantizeBase)
 
     def test_del_fakequant_before_module(self):
         model_to_quantize = ToyModel()
@@ -325,30 +419,33 @@ class TestGraphUtils(TestCase):
             example_inputs=self.example_inputs,
             backend_config=self.backend_config)
 
-        module_prev = ('torch.nn.ReLU6', 'torch.nn.Identity')
+        module_del_prev_fakequant = (torch.nn.ReLU6, torch.nn.Identity)
 
         prepared_after_del = del_fakequant_before_module(
-            prepared, str2class(module_prev), inplace=False)
+            prepared, module_del_prev_fakequant, inplace=False)
         for node in prepared.graph.nodes:
             if node.op == 'call_module' and isinstance(
-                    _get_attrs(prepared, node.target), str2class(module_prev)):
+                    _get_attrs(prepared, node.target),
+                    module_del_prev_fakequant):
                 args = node.args
                 self.assertIsInstance(
                     _get_attrs(prepared, args[0].target), FakeQuantizeBase)
 
         for node in prepared_after_del.graph.nodes:
             if node.op == 'call_module' and isinstance(
-                    _get_attrs(prepared, node.target), str2class(module_prev)):
+                    _get_attrs(prepared, node.target),
+                    module_del_prev_fakequant):
                 args = node.args
                 if args[0].op == 'call_module':
                     self.assertNotIsInstance(
                         _get_attrs(prepared, args[0].target), FakeQuantizeBase)
 
         prepared_after_del = del_fakequant_before_module(
-            prepared, str2class(module_prev), inplace=True)
+            prepared, module_del_prev_fakequant, inplace=True)
         for node in prepared_after_del.graph.nodes:
             if node.op == 'call_module' and isinstance(
-                    _get_attrs(prepared, node.target), str2class(module_prev)):
+                    _get_attrs(prepared, node.target),
+                    module_del_prev_fakequant):
                 args = node.args
                 if args[0].op == 'call_module':
                     self.assertNotIsInstance(
@@ -374,26 +471,29 @@ class TestGraphUtils(TestCase):
             example_inputs=self.example_inputs,
             backend_config=self.backend_config)
 
-        module_next = ('torch.nn.MaxPool2d', )
+        module_del_next_fakequant = (torch.nn.MaxPool2d, )
 
         prepared_after_del = del_fakequant_after_module(
-            prepared, str2class(module_next), inplace=False)
+            prepared, module_del_next_fakequant, inplace=False)
         for node in prepared.graph.nodes:
-            if node.target == 'block_conv1':
-                args = node.args
+            if node.op == 'call_module' and isinstance(
+                    _get_attrs(prepared, node.target),
+                    module_del_next_fakequant):
                 self.assertIsInstance(
-                    _get_attrs(prepared, args[0].target), FakeQuantizeBase)
+                    _get_attrs(prepared, node.next.target), FakeQuantizeBase)
 
         for node in prepared_after_del.graph.nodes:
-            if node.target == 'block_conv1':
-                args = node.args
-                self.assertIsInstance(
-                    _get_attrs(prepared, args[0].target), nn.MaxPool2d)
+            if node.op == 'call_module' and isinstance(
+                    _get_attrs(prepared, node.target),
+                    module_del_next_fakequant):
+                self.assertNotIsInstance(
+                    _get_attrs(prepared, node.next.target), FakeQuantizeBase)
 
         prepared_after_del = del_fakequant_after_module(
-            prepared, str2class(module_next), inplace=True)
+            prepared, module_del_next_fakequant, inplace=True)
         for node in prepared_after_del.graph.nodes:
-            if node.target == 'block_conv1':
-                args = node.args
-                self.assertIsInstance(
-                    _get_attrs(prepared, args[0].target), nn.MaxPool2d)
+            if node.op == 'call_module' and isinstance(
+                    _get_attrs(prepared, node.target),
+                    module_del_next_fakequant):
+                self.assertNotIsInstance(
+                    _get_attrs(prepared, node.next.target), FakeQuantizeBase)

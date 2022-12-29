@@ -6,10 +6,7 @@ from torch.ao.quantization import disable_observer
 from torch.ao.quantization.fx import prepare
 from torch.ao.quantization.quantize_fx import _fuse_fx
 
-from mmrazor.models.task_modules.tracer.fx import (
-    build_graphmodule, del_fakequant_after_module, del_fakequant_after_op,
-    del_fakequant_after_target, del_fakequant_before_module,
-    del_fakequant_before_op, del_fakequant_before_target)
+from mmrazor.models.task_modules.tracer.fx import build_graphmodule
 from mmrazor.registry import MODELS
 from .native_quantizer import NativeQuantizer
 
@@ -54,18 +51,7 @@ class OpenVINOQuantizer(NativeQuantizer):
             example_inputs=self.example_inputs,
             backend_config=self.backend_config)
 
-        prepared = del_fakequant_before_module(
-            prepared, MODULE_DEL_PREV_FAKEQUANT, inplace=True)
-        prepared = del_fakequant_after_module(
-            prepared, MODULE_DEL_NEXT_FAKEQUANT, inplace=True)
-        prepared = del_fakequant_before_target(
-            prepared, TARGET_DEL_PREV_FAKEQUANT, inplace=True)
-        prepared = del_fakequant_after_target(
-            prepared, TARGET_DEL_NEXT_FAKEQUANT, inplace=True)
-        prepared = del_fakequant_before_op(
-            prepared, OP_DEL_PREV_FAKEQUANT, inplace=True)
-        prepared = del_fakequant_after_op(
-            prepared, OP_DEL_NEXT_FAKEQUANT, inplace=True)
+        prepared = self.del_fakequant(prepared)
 
         return prepared
 
@@ -89,3 +75,19 @@ class OpenVINOQuantizer(NativeQuantizer):
         observed_model.apply(disable_observer)
 
         return observed_model
+
+    @property
+    def module_del_prev_fakequant(self):
+        return (torch.nn.ReLU6, torch.nn.Identity)
+
+    @property
+    def module_del_next_fakequant(self):
+        return (torch.nn.MaxPool2d, )
+
+    @property
+    def method_del_next_fakequant(self):
+        return ('flatten', )
+
+    @property
+    def op_del_prev_fakequant(self):
+        return ('output', )
