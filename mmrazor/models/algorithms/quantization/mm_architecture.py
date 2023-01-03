@@ -8,6 +8,7 @@ from mmengine.runner import load_checkpoint
 from mmengine.structures import BaseDataElement
 from torch import nn
 
+from torch.ao.quantization import FakeQuantizeBase
 from mmrazor.models.fake_quants import BaseFakeQuantize
 from mmrazor.models.observers import BaseObserver
 from mmrazor.models.task_modules import build_graphmodule
@@ -64,13 +65,16 @@ class MMArchitectureQuant(BaseAlgorithm):
 
         self.qmodels = self._build_qmodels(self.architecture)
         self.sync_qparams('predict')
-        self.reset_min_max_vals(self.qmodels)
+        self.reset_min_max_vals(self)
 
     def reset_min_max_vals(self, model):
         for module in model.modules():
             if isinstance(module, BaseObserver):
                 assert hasattr(module, 'reset_min_max_vals')
                 module.reset_min_max_vals()
+            elif isinstance(module, FakeQuantizeBase):
+                module.scale.data = torch.ones_like(module.scale)
+                module.zero_point.data = torch.zeros_like(module.zero_point)
 
     def sync_qparams(self, src_mode):
 
@@ -79,7 +83,7 @@ class MMArchitectureQuant(BaseAlgorithm):
                 if module is None:
                     continue
                 child_name = f'{prefix}{name}'
-                if isinstance(child, BaseFakeQuantize):
+                if isinstance(child, FakeQuantizeBase):
                     for name, param in child.named_parameters():
                         param_name = f'{child_name}.{name}'
                         src_param = src_state_dict[param_name]
@@ -118,8 +122,8 @@ class MMArchitectureQuant(BaseAlgorithm):
         for mode in self.forward_modes:
             concrete_args = {'mode': mode}
             traced_graph = tracer.trace(model, concrete_args=concrete_args)
-            graph_mopdule = build_graphmodule(model, traced_graph)
-            observed_module = self.quantizer.prepare(model, graph_mopdule)
+            graph_module = build_graphmodule(model, traced_graph)
+            observed_module = self.quantizer.prepare(model, graph_module)
             qmodels[mode] = observed_module
 
         is_training = qmodels['predict'].training
@@ -171,6 +175,8 @@ class MMArchitectureQuantDDP(MMDistributedDataParallel):
         # (`model.cuda()`), the buffers in model are different.
         self.module.qmodels = self.module._build_qmodels(
             self.module.architecture)
+        self.module.sync_qparams('predict')
+        self.module.reset_min_max_vals(self)
 
     def calibrate_step(self, data):
         return self.module.calibrate_step(data)

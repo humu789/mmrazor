@@ -10,6 +10,118 @@ from torch.nn.intrinsic.qat import freeze_bn_stats
 from torch.utils.data import DataLoader
 
 from mmrazor.registry import LOOPS
+from mmrazor.models.fake_quants import (
+    LearnableFakeQuantize, enable_val, enable_param_learning,
+    enable_static_estimate)
+
+
+def enable_param_learning(mod):
+    if isinstance(mod, LearnableFakeQuantize):
+        mod.enable_param_learning()
+
+
+def enable_static_estimate(mod):
+    if isinstance(mod, LearnableFakeQuantize):
+        mod.enable_static_estimate()
+
+
+def enable_val(mod):
+    if isinstance(mod, LearnableFakeQuantize):
+        mod.enable_val()
+
+def lsq_enable_observer(mod):
+    if isinstance(mod, LearnableFakeQuantize):
+        mod.toggle_observer_update(True)
+
+def lsq_disable_observer(mod):
+    if isinstance(mod, LearnableFakeQuantize):
+        mod.toggle_observer_update(False)
+
+def lsq_enable_fake_quant(mod):
+    if isinstance(mod, LearnableFakeQuantize):
+        mod.toggle_fake_quant(True)
+
+
+@LOOPS.register_module()
+class LSQEpochBasedLoop(EpochBasedTrainLoop):
+    """`EpochBasedLoop` for `QuantizationAwareTraining`
+
+    Args:
+        runner (Runner): A reference of runner
+        dataloader (Dataloader or dict): An iterator to generate one batch of
+            dataset each iteration.
+        max_epochs (int): Total training epochs.
+        val_begin (int): The epoch that begins validating.
+            Defaults to 1.
+        val_interval (int): Validation interval. Defaults to 1.
+        disable_observer_begin (int): The number of total epochs to update
+            observers.
+        freeze_bn_begin (int): The number of total epochs to update batch norm
+            stats.
+        dynamic_intervals (List[Tuple[int, int]], optional): The
+            first element in the tuple is a milestone and the second
+            element is a interval. The interval is used after the
+            corresponding milestone. Defaults to None.
+    """
+
+    def __init__(
+            self,
+            runner,
+            dataloader: Union[DataLoader, Dict],
+            max_epochs: int,
+            val_begin: int = 1,
+            val_interval: int = 1,
+            freeze_bn_begin: int = 3,
+            dynamic_intervals: Optional[List[Tuple[int, int]]] = None) -> None:
+        super().__init__(runner, dataloader, max_epochs, val_begin,
+                         val_interval, dynamic_intervals)
+
+        self.freeze_bn_begin = freeze_bn_begin
+        self.is_first_batch = True
+
+    def run(self):
+        """Launch training."""
+        self.runner.call_hook('before_train')
+
+        self.runner.model.apply(enable_val)
+        self.runner.val_loop.run()
+
+        while self._epoch < self._max_epochs:
+            self.run_epoch()
+
+            self._decide_current_val_interval()
+            if (self.runner.val_loop is not None
+                    and self._epoch >= self.val_begin
+                    and self._epoch % self.val_interval == 0):
+                # observer disabled during evaluation
+                self.runner.model.apply(enable_val)
+                self.runner.model.sync_qparams(src='loss')
+                self.runner.val_loop.run()
+
+        self.runner.call_hook('after_train')
+
+    def run_epoch(self) -> None:
+        """Iterate one epoch."""
+        self.runner.call_hook('before_train_epoch')
+        self.runner.model.train()
+
+        # TODO freeze bn
+        if self._epoch >= self.freeze_bn_begin:
+            self.runner.model.apply(freeze_bn_stats)
+
+        for idx, data_batch in enumerate(self.dataloader):
+            if self.is_first_batch:
+                # lsq init
+                self.is_first_batch = False
+                self.runner.model.apply(enable_static_estimate)
+                # self.runner.model.apply(lsq_enable_fake_quant)
+                # self.runner.model.apply(lsq_enable_observer)
+            else:
+                self.runner.model.apply(enable_param_learning)
+            self.run_iter(idx, data_batch)
+
+        self.runner.call_hook('after_train_epoch')
+        self._epoch += 1
 
 
 @LOOPS.register_module()
@@ -49,13 +161,17 @@ class QATEpochBasedLoop(EpochBasedTrainLoop):
 
         self.disable_observer_begin = disable_observer_begin
         self.freeze_bn_begin = freeze_bn_begin
+        self.cnt = 0
 
     def run(self) -> torch.nn.Module:
         """Launch training."""
         self.runner.call_hook('before_train')
 
+        self.runner.model.apply(enable_fake_quant)
+        self.runner.model.apply(disable_observer)
+        self.runner.val_loop.run()
+
         while self._epoch < self._max_epochs:
-            # state: observer_enabled, fakequant_enabled
             self.runner.model.apply(enable_fake_quant)
             self.runner.model.apply(enable_observer)
             self.run_epoch()
@@ -67,6 +183,7 @@ class QATEpochBasedLoop(EpochBasedTrainLoop):
                 # observer disabled during evaluation
                 self.runner.model.apply(enable_fake_quant)
                 self.runner.model.apply(disable_observer)
+                self.runner.model.sync_qparams(src='loss')
                 self.runner.val_loop.run()
 
         self.runner.call_hook('after_train')
@@ -219,6 +336,7 @@ class PTQLoop(TestLoop):
         self.runner.call_hook('before_test_epoch')
 
         self.runner.model.eval()
+        # todo: disable fake quant during calibration
         self.runner.model.apply(enable_fake_quant)
         self.runner.model.apply(enable_observer)
 

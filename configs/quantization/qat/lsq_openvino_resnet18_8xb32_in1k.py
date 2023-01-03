@@ -1,17 +1,13 @@
-_base_ = ['mmcls::resnet/resnet18_8xb16_cifar10.py']
+_base_ = ['mmcls::resnet/resnet18_8xb32_in1k.py']
 
 resnet = _base_.model
-float_ckpt = '/mnt/petrelfs/caoweihan.p/ckpt/resnet18_b16x8_cifar10_20210528-bd6371c8.pth'  # noqa: E501
+float_ckpt = '/mnt/petrelfs/caoweihan.p/ckpt/resnet18_8xb32_in1k_20210831-fbbb1da6.pth'  # noqa: E501
 
 global_qconfig = dict(
     w_observer=dict(type='mmrazor.LSQPerChannelMinMaxObserver'),
     a_observer=dict(type='mmrazor.LSQMinMaxObserver'),
     w_fake_quant=dict(type='mmrazor.LearnableFakeQuantize'),
     a_fake_quant=dict(type='mmrazor.LearnableFakeQuantize'),
-    # w_observer=dict(type='mmrazor.PerChannelMinMaxObserver'),
-    # a_observer=dict(type='mmrazor.MovingAverageMinMaxObserver'),
-    # w_fake_quant=dict(type='mmrazor.FakeQuantize'),
-    # a_fake_quant=dict(type='mmrazor.FakeQuantize'),
     w_qscheme=dict(
         qdtype='qint8', bit=8, is_symmetry=True, is_symmetric_range=True),
     a_qscheme=dict(
@@ -24,14 +20,14 @@ model = dict(
     type='MMArchitectureQuant',
     data_preprocessor=dict(
         type='mmcls.ClsDataPreprocessor',
-        num_classes=10,
+        num_classes=1000,
         # RGB format normalization parameters
-        mean=[125.307, 122.961, 113.8575],
-        std=[51.5865, 50.847, 51.255],
-        # loaded images are already RGB format
-        to_rgb=False),
+        mean=[123.675, 116.28, 103.53],
+        std=[58.395, 57.12, 57.375],
+        # convert image from BGR to RGB
+        to_rgb=True),
     architecture=resnet,
-    # float_checkpoint=float_ckpt,
+    float_checkpoint=float_ckpt,
     quantizer=dict(
         type='mmrazor.OpenVINOQuantizer',
         global_qconfig=global_qconfig,
