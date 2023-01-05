@@ -175,7 +175,7 @@ class MMArchitectureQuantDDP(MMDistributedDataParallel):
         # (`model.cuda()`), the buffers in model are different.
         self.module.qmodels = self.module._build_qmodels(
             self.module.architecture)
-        self.module.sync_qparams('predict')
+        self.module.sync_qparams('tensor')
         self.module.reset_min_max_vals(self)
 
     def calibrate_step(self, data):
