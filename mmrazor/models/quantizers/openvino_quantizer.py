@@ -39,6 +39,12 @@ class OpenVINOQuantizer(NativeQuantizer):
         return ['per_tensor']
 
     def prepare(self, model, graph_module):
+        def eval(model):
+            for module in model.modules():
+                module.training = False
+            return
+        eval(graph_module)
+
         graph_module = _fuse_fx(
             graph_module=graph_module,
             is_qat=True,

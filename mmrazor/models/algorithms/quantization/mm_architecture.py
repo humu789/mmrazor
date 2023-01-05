@@ -64,7 +64,7 @@ class MMArchitectureQuant(BaseAlgorithm):
         self.forward_modes = forward_modes
 
         self.qmodels = self._build_qmodels(self.architecture)
-        self.sync_qparams('predict')
+        self.sync_qparams('tensor')
         self.reset_min_max_vals(self)
 
     def reset_min_max_vals(self, model):
@@ -126,9 +126,9 @@ class MMArchitectureQuant(BaseAlgorithm):
             observed_module = self.quantizer.prepare(model, graph_module)
             qmodels[mode] = observed_module
 
-        is_training = qmodels['predict'].training
+        is_training = qmodels['tensor'].training
         # Avoid random input changing bn's statistics
-        qmodels['predict'].eval()
+        qmodels['tensor'].eval()
         # Originally, the steps to train a qat model is as follows:
         # 1. build qmodels 2. convert the model to ddpmodel 3. forward backward
         # The shape of `scale` and `zero_point` can be modified during forward.
@@ -138,8 +138,8 @@ class MMArchitectureQuant(BaseAlgorithm):
         # dummy input to make sure the shape has been modified.
         device = next(qmodels.parameters()).device
         dummy_input = torch.randn(self.input_shapes).to(device)
-        qmodels['predict'](dummy_input, None, 'predict')
-        qmodels['predict'].train(mode=is_training)
+        qmodels['tensor'](dummy_input, None, 'tensor')
+        qmodels['tensor'].train(mode=is_training)
 
         return qmodels
 
