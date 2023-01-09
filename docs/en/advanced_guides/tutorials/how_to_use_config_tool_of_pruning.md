@@ -75,14 +75,9 @@ mutator = ChannelMutator(
         units={},
     ),
     parse_cfg=dict(
-<<<<<<< HEAD
         type='ChannelAnalyzer',
         demo_input=(1, 3, 224, 224),
         tracer_type='BackwardTracer'))
-=======
-        type='BackwardTracer',
-        loss_calculator=dict(type='ImageClassifierPseudoLoss')))
->>>>>>> c6637be ([FEATURE] add quant algo `Learned Step Size Quantization` (#346))
 # init the ChannelMutator object with a model
 mutator.prepare_from_supernet(model)
 config=mutator.config_template(with_unit_init_args=True)
@@ -107,16 +102,9 @@ print(config)
 #         }
 #     },
 #     'parse_cfg': {
-<<<<<<< HEAD
 #         type='ChannelAnalyzer',
 #         demo_input=(1, 3, 224, 224),
 #         tracer_type='BackwardTracer'
-=======
-#         'type': 'BackwardTracer',
-#         'loss_calculator': {
-#             'type': 'ImageClassifierPseudoLoss'
-#         }
->>>>>>> c6637be ([FEATURE] add quant algo `Learned Step Size Quantization` (#346))
 #     }
 # }
 ```
@@ -133,15 +121,9 @@ mutator2.prepare_from_supernet(resnet34())
 To make your development more fluent, we provide a command tool to parse a model and return the config template.
 
 ```shell
-<<<<<<< HEAD
 $ python ./tools/pruning/get_channel_units.py -h
 
 usage: pruning/get_channel_units.py [-h] [-c] [-i] [--choice] [-o OUTPUT_PATH] config
-=======
-$ python ./tools/get_channel_units.py -h
-
-usage: get_channel_units.py [-h] [-c] [-i] [--choice] [-o OUTPUT_PATH] config
->>>>>>> c6637be ([FEATURE] add quant algo `Learned Step Size Quantization` (#346))
 
 Get channel unit of a model.
 
@@ -160,11 +142,7 @@ optional arguments:
 Take the algorithm Slimmable Network as an example.
 
 ```shell
-<<<<<<< HEAD
 python ./tools/pruning/get_channel_units.py ./configs/pruning/mmcls/autoslim/autoslim_mbv2_1.5x_slimmable_subnet_8xb256_in1k.py
-=======
-python ./tools/get_channel_units.py ./configs/pruning/mmcls/autoslim/autoslim_mbv2_1.5x_slimmable_subnet_8xb256_in1k.py
->>>>>>> c6637be ([FEATURE] add quant algo `Learned Step Size Quantization` (#346))
 
 # {
 #     "type":"SlimmableChannelMutator",
@@ -182,15 +160,9 @@ python ./tools/get_channel_units.py ./configs/pruning/mmcls/autoslim/autoslim_mb
 #         }
 #     },
 #     "parse_cfg":{
-<<<<<<< HEAD
 #          type='ChannelAnalyzer',
 #          demo_input=(1, 3, 224, 224),
 #          tracer_type='BackwardTracer'
-=======
-#         "type":"BackwardTracer",
-#         "loss_calculator":{
-#             "type":"ImageClassifierPseudoLoss"
->>>>>>> c6637be ([FEATURE] add quant algo `Learned Step Size Quantization` (#346))
 #         }
 #     }
 # }
@@ -199,11 +171,7 @@ python ./tools/get_channel_units.py ./configs/pruning/mmcls/autoslim/autoslim_mb
 The '-i' flag will return the config with the initialization arguments.
 
 ```shell
-<<<<<<< HEAD
 python ./tools/pruning/get_channel_units.py -i ./configs/pruning/mmcls/autoslim/autoslim_mbv2_1.5x_slimmable_subnet_8xb256_in1k.py
-=======
-python ./tools/get_channel_units.py -i ./configs/pruning/mmcls/autoslim/autoslim_mbv2_1.5x_slimmable_subnet_8xb256_in1k.py
->>>>>>> c6637be ([FEATURE] add quant algo `Learned Step Size Quantization` (#346))
 
 # {
 #     "type":"SlimmableChannelMutator",
@@ -228,15 +196,9 @@ python ./tools/get_channel_units.py -i ./configs/pruning/mmcls/autoslim/autoslim
 #         }
 #     },
 #     "parse_cfg":{
-<<<<<<< HEAD
 #           type='ChannelAnalyzer',
 #           demo_input=(1, 3, 224, 224),
 #           tracer_type='BackwardTracer'
-=======
-#         "type":"BackwardTracer",
-#         "loss_calculator":{
-#             "type":"ImageClassifierPseudoLoss"
->>>>>>> c6637be ([FEATURE] add quant algo `Learned Step Size Quantization` (#346))
 #         }
 #     }
 # }
@@ -245,11 +207,7 @@ python ./tools/get_channel_units.py -i ./configs/pruning/mmcls/autoslim/autoslim
 With "--choice" flag, it will return the choice template, a dict which uses unit_name as key, and use the choice value as value.
 
 ```shell
-<<<<<<< HEAD
 python ./tools/pruning/get_channel_units.py -i ./configs/pruning/mmcls/autoslim/autoslim_mbv2_1.5x_slimmable_subnet_8xb256_in1k.py --choice
-=======
-python ./tools/get_channel_units.py -i ./configs/pruning/mmcls/autoslim/autoslim_mbv2_1.5x_slimmable_subnet_8xb256_in1k.py --choice
->>>>>>> c6637be ([FEATURE] add quant algo `Learned Step Size Quantization` (#346))
 
 # {
 #     "backbone.conv1.conv_(0, 48)_48":32,
