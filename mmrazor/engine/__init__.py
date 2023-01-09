@@ -3,9 +3,9 @@ from .hooks import DumpSubnetHook, EstimateResourcesHook
 from .optimizers import SeparateOptimWrapperConstructor
 from .runner import (AutoSlimGreedySearchLoop, DartsEpochBasedTrainLoop,
                      DartsIterBasedTrainLoop, EvolutionSearchLoop,
-                     GreedySamplerTrainLoop, SelfDistillValLoop,
-                     SingleTeacherDistillValLoop, SlimmableValLoop,
-                     SubnetValLoop, PTQLoop, QATEpochBasedLoop)
+                     GreedySamplerTrainLoop, PTQLoop, QATEpochBasedLoop,
+                     SelfDistillValLoop, SingleTeacherDistillValLoop,
+                     SlimmableValLoop, SubnetValLoop)
 
 __all__ = [
     'SeparateOptimWrapperConstructor', 'DumpSubnetHook',
