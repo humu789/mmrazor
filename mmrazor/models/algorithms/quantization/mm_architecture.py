@@ -55,13 +55,15 @@ class MMArchitectureQuant(BaseAlgorithm):
         # The build process is in MMEngine, so we need to add scope here.
         data_preprocessor.setdefault('type', 'mmcls.ClsDataPreprocessor')
         super().__init__(architecture, data_preprocessor, init_cfg)
-        if float_checkpoint:
-            _ = load_checkpoint(self.architecture, float_checkpoint)
-            self.architecture._is_init = True
 
         self.quantizer = MODELS.build(quantizer)
         self.input_shapes = input_shapes
         self.forward_modes = forward_modes
+
+        self.quantizer.replace_syncbn_with_bn(self.architecture)
+        if float_checkpoint:
+            _ = load_checkpoint(self.architecture, float_checkpoint)
+            self.architecture._is_init = True
 
         self.qmodels = self._build_qmodels(self.architecture)
         self.sync_qparams('tensor')

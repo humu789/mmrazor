@@ -156,13 +156,37 @@ def _prepare_module_dict(model: nn.Module, fx_graph: torch.fx.Graph):
 
     return module_dict
 
+from copy import deepcopy
+def duplicate_reused_nodes(graph: torch.fx.Graph, modules: Dict[str, Any] = {}):
+    _dup_prefix = '_dup'
+    target_dict = dict()
+    dup_modules = dict()
+    for node in graph.nodes:
+        if node.op == "call_module":
+            if node.target not in target_dict:
+                target_dict[node.target] = [node]
+            else:
+                target_dict[node.target].append(node)
+    for key in target_dict:
+        if len(target_dict[key]) > 1:
+            for idx, node in enumerate(target_dict[key]):
+                if idx == 0:
+                    continue
+                module = deepcopy(modules[node.target])
+                node.target += _dup_prefix + str(idx)
+                dup_modules[node.target] = module
+    graph.lint()
+    return graph, dup_modules
+
 
 def build_graphmodule(model: nn.Module,
                       fx_graph: torch.fx.Graph,
                       name: str = 'GraphModule'):
     modules = dict(model.named_modules())
     module_dict = _prepare_module_dict(model, fx_graph)
+    fx_graph, duplicated_modules = duplicate_reused_nodes(fx_graph, modules)
     modules.update(module_dict)
+    modules.update(duplicated_modules)
     return GraphModule(modules, fx_graph, name)
 
 

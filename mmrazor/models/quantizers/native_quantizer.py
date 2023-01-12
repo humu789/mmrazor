@@ -2,10 +2,11 @@
 import torch
 from torch.ao.quantization import enable_fake_quant
 from torch.ao.quantization.fx import prepare
-from torch.ao.quantization.qconfig_mapping import QConfigMapping
+from torch.ao.quantization.qconfig_mapping import QConfigMapping, _FIXED_QPARAMS_OP_TO_OBSERVER, FixedQParamsFakeQuantize, QConfig, default_weight_fake_quant
 from torch.ao.quantization.quantize_fx import _fuse_fx
 from torch.nn.intrinsic.qat import modules as qat_fused_modules
 from torch.nn.qat import modules as qat_modules
+from torch.ao.quantization.qconfig import float16_static_qconfig
 
 from mmrazor.models.utils import str2class
 from mmrazor.registry import MODELS
@@ -64,6 +65,21 @@ class NativeQuantizer(BaseQuantizer):
                 self.qconfig_mapping.set_object_type(mod, None)
         else:
             self.no_observer_modules = no_observer_modules
+
+        # fixed_qparams_qconfig = QConfig(activation=float16_static_qconfig.activation, weight=self.qconfig_mapping.global_qconfig.weight)
+        # self.qconfig_mapping.set_object_type(torch.nn.Hardsigmoid, fixed_qparams_qconfig)
+        # input()
+        fixed_qparams_observer_to_qconfig = {}
+        for fixed_qparams_op, observer in _FIXED_QPARAMS_OP_TO_OBSERVER.items():
+            if observer in fixed_qparams_observer_to_qconfig:
+                fixed_qparams_qconfig = fixed_qparams_observer_to_qconfig[observer]
+            else:
+                activation = FixedQParamsFakeQuantize.with_args(observer=observer)
+
+                fixed_qparams_qconfig = QConfig(activation=activation, weight=default_weight_fake_quant)
+                fixed_qparams_observer_to_qconfig[observer] = fixed_qparams_qconfig
+            self.qconfig_mapping.set_object_type(fixed_qparams_op, fixed_qparams_qconfig)
+
         self.backend_config = BackendConfigs[self.backend]
         self.example_inputs = (torch.randn(1, 3, 224, 224), )
 

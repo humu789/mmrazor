@@ -39,6 +39,7 @@ class OpenVINOQuantizer(NativeQuantizer):
         return ['per_tensor']
 
     def prepare(self, model, graph_module):
+        # todo: 根据qat还是ptq判断是eval还是train
         def eval(model):
             for module in model.modules():
                 module.training = False
@@ -66,6 +67,7 @@ class OpenVINOQuantizer(NativeQuantizer):
                              dummy_input=(1, 3, 224, 224),
                              checkpoint=None):
 
+        self.replace_syncbn_with_bn(model)
         self.swap_ff_with_fxff(model)
         graph = self.tracer.trace(model)
         graph_module = build_graphmodule(model, graph)
