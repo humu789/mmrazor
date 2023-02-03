@@ -317,7 +317,12 @@ class PTQLoop(TestLoop):
         self.runner.model.apply(enable_fake_quant)
         self.runner.model.apply(enable_observer)
 
+        # for n, m in self.runner.model.qmodels['predict'].named_modules():
+        #     print(n)
+
         for idx, data_batch in enumerate(self.dataloader):
+            # if idx == 0:
+            #     demo_data = data_batch
             if idx == self.calibrate_steps:
                 break
             self.run_iter(idx, data_batch)
@@ -335,6 +340,40 @@ class PTQLoop(TestLoop):
         self.runner.model.apply(enable_fake_quant)
         self.runner.model.apply(disable_observer)
 
+        from torch.ao.quantization import disable_fake_quant
+        self.runner.model.qmodels['predict'].backbone.apply(disable_fake_quant)
+        # act_fakequants = ['activation_post_process_' + str(i) for i in range(80, 107)]  # noqa: E501
+        for n, m in self.runner.model.qmodels['predict'].named_modules():
+            if 'activation_post_process_' in n and '.' not in n:
+                m.apply(disable_fake_quant)
+                print(n)
+                print(m)
+                print('\n')
+        # self.runner.model.qmodels['predict'].neck.apply(disable_fake_quant)
+        # self.runner.model.qmodels['predict'].bbox_head.apply(disable_fake_quant)  # noqa: E501
+
+        # def insert_output_for_debug(graphmodule, node_name):
+        #     import copy
+        #     subgraph = copy.deepcopy(graphmodule.graph)
+        #     subgraph.output(node_name)
+        #     subgraph.lint()
+        #     subgraph_module = torch.fx.GraphModule(graphmodule, subgraph)
+        #     subgraph_module.graph.eliminate_dead_code()
+        #     subgraph_module.recompile()
+        #     return subgraph_module
+        # backbone_node = 'backbone_stage4_2_final_conv_activate'
+        # neck_node = 'neck_out_convs_2_activate'
+        # graphmodule = self.runner.model.qmodels['predict']
+        # subgraph_module_backbone = insert_output_for_debug(graphmodule, backbone_node)  # noqa: E501
+        # demo_data =  self.runner.model.data_preprocessor(demo_data, False)
+        # import pdb;pdb.set_trace()
+        # output_fp = subgraph_module_backbone(demo_data)
+
+        # self.runner.model.apply(enable_fake_quant)
+        # import pdb;pdb.set_trace()
+        # output_int = subgraph_module_backbone(demo_data)
+
+        # import pdb;pdb.set_trace()
         return self.runner.val_loop.run()
 
     @torch.no_grad()
