@@ -56,7 +56,6 @@ class OpenVINOQuantizer(NativeQuantizer):
                     **kwargs):
         """Export the onnx model that can be deployed to OpenVino backend."""
 
-<<<<<<< HEAD
         symbolic_output_path = f'symbolic_{output_path}'
         torch.onnx.export(
             model,
@@ -68,34 +67,41 @@ class OpenVINOQuantizer(NativeQuantizer):
         from .exporters import OpenVinoQuantizeExportor
         exporter = OpenVinoQuantizeExportor(symbolic_output_path, output_path)
         exporter.export()
-=======
+
+    def post_process_for_mmdeploy(self, dummy_input: Tuple = (1, 3, 224, 224)):
+        """Prepare for deploy to the backend with mmdeploy, which will be used
+        in mmdeploy, and usually includes as follows:
+
         1. prepare for the float model rewritten by mmdeploy.
         2. load checkpoint consists of float weight and quantized params in
         mmrazor.
         3. post process weight fakequant for exporting .onnx that meet
         the backend's requirement.
         """
-        self.convert_batchnorm2d(model)
-        observed_model = self.prepare(model)
+
+        quantized_state_dict = self.qmodels['tensor'].state_dict()
+        fp32_model = self.architecture
+        self.convert_batchnorm2d(fp32_model)
+        observed_model = self.prepare(fp32_model, {'mode': 'tensor'})
+
         if dummy_input is not None:
             observed_model(torch.randn(dummy_input))
-        if checkpoint is not None:
-            observed_model.load_state_dict(
-                torch.load(checkpoint)['state_dict'], strict=False)
-        self.post_process_weight_fakequant(
-            observed_model, keep_fake_quant=True)
-        
+
+        observed_model.load_state_dict(quantized_state_dict)
+
+        self.post_process_for_deploy(observed_model, keep_w_fake_quant=True)
+
         for node in observed_model.graph.nodes:
             if 'activation_post_process_' in node.name:
                 module_name = node.target
                 module = getattr(observed_model, module_name)
-                fakequant_new = QConfigHandler.replace_fakequant(module, self.qconfig.a_qscheme, update_qparams=True)
+                fakequant_new = QConfigHandler.replace_fakequant(
+                    module, self.qconfig.a_qscheme, update_qparams=True)
                 setattr(observed_model, module_name, fakequant_new)
-        
+
         observed_model.apply(disable_observer)
 
         return observed_model
->>>>>>> 8c7a2f39 (move to aide)
 
     @property
     def module_prev_wo_fakequant(self):
